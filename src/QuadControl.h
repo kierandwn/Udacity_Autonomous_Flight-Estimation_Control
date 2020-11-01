@@ -8,7 +8,7 @@
 class QuadControl : public BaseController
 {
 public:
-  QuadControl(string name, string config) : BaseController(name,config) { Init(); };
+  QuadControl(string config) : BaseController(config) { Init(); };
 
   virtual void Init();
 
@@ -38,6 +38,9 @@ public:
   float kpBank, kpYaw;
   float KiPosZ;
   V3F kpPQR;
+
+  float l, kappa;
+  float ixx, iyy, izz;
   
   // limits & saturations
   float maxAscentRate, maxDescentRate;
@@ -49,3 +52,5 @@ public:
   // integral control
   float integratedAltitudeError;
 };
+
+//V3F CONSTRAIN(V3F UNBOUNDED, float low, float high);
