@@ -7,6 +7,7 @@
 using namespace SLR;
 
 const int QuadEstimatorEKF::QUAD_EKF_NUM_STATES;
+const double PHYS_CONST_GRAVITY = 9.81f;
 
 QuadEstimatorEKF::QuadEstimatorEKF(string config, string name)
   : BaseQuadEstimator(config),
@@ -89,27 +90,20 @@ void QuadEstimatorEKF::UpdateFromIMU(V3F accel, V3F gyro)
   //       (Quaternion<float> also has a IntegrateBodyRate function, though this uses quaternions, not Euler angles)
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
-  // SMALL ANGLE GYRO INTEGRATION:
-  // (replace the code below)
-  // make sure you comment it out when you add your own code -- otherwise e.g. you might integrate yaw twice
+  Quaternion<float> q;
+  q = q.FromEuler123_RPY(rollEst, pitchEst, ekfState(6));
+  q = q.IntegrateBodyRate(gyro, dtIMU);
 
-  float predictedPitch = pitchEst + dtIMU * gyro.y;
-  float predictedRoll = rollEst + dtIMU * gyro.x;
-  ekfState(6) = ekfState(6) + dtIMU * gyro.z;	// yaw
-
-  // normalize yaw to -pi .. pi
-  if (ekfState(6) > F_PI) ekfState(6) -= 2.f*F_PI;
-  if (ekfState(6) < -F_PI) ekfState(6) += 2.f*F_PI;
-
+  ekfState(6) = q.ToEulerRPY().z;
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   // CALCULATE UPDATE
   accelRoll = atan2f(accel.y, accel.z);
-  accelPitch = atan2f(-accel.x, 9.81f);
+  accelPitch = atan2f(-accel.x, PHYS_CONST_GRAVITY);
 
   // FUSE INTEGRATION AND UPDATE
-  rollEst = attitudeTau / (attitudeTau + dtIMU) * (predictedRoll)+dtIMU / (attitudeTau + dtIMU) * accelRoll;
-  pitchEst = attitudeTau / (attitudeTau + dtIMU) * (predictedPitch)+dtIMU / (attitudeTau + dtIMU) * accelPitch;
+  rollEst = attitudeTau / (attitudeTau + dtIMU) * (q.ToEulerRPY().x)+dtIMU / (attitudeTau + dtIMU) * accelRoll;
+  pitchEst = attitudeTau / (attitudeTau + dtIMU) * (q.ToEulerRPY().y)+dtIMU / (attitudeTau + dtIMU) * accelPitch;
 
   lastGyro = gyro;
 }
@@ -161,38 +155,77 @@ VectorXf QuadEstimatorEKF::PredictState(VectorXf curState, float dt, V3F accel, 
   Quaternion<float> attitude = Quaternion<float>::FromEuler123_RPY(rollEst, pitchEst, curState(6));
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
+  predictedState(0) += curState(3) * dt;
+  predictedState(1) += curState(4) * dt;
+  predictedState(2) += curState(5) * dt;
 
+  V3F accel_inertial = attitude.Rotate_BtoI(accel);
+  predictedState(3) += accel_inertial.x * dt;
+  predictedState(4) += accel_inertial.y * dt;
+  predictedState(5) += accel_inertial.z * dt - PHYS_CONST_GRAVITY * dt;
 
+  predictedState(6) = curState(6); // not integrating yaw.
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   return predictedState;
 }
 
+// Not really necessary, whoops. //
+MatrixXf QuadEstimatorEKF::GetRbg(float roll, float pitch, float yaw)
+{
+    MatrixXf Rbg(3, 3);
+    Rbg <<
+        cos(pitch) * cos(yaw), sin(roll)* sin(pitch)* cos(yaw) - cos(roll) * sin(yaw), cos(roll)* sin(pitch)* cos(yaw) + sin(roll) * sin(yaw),
+        cos(pitch)* sin(yaw), sin(roll)* sin(pitch)* sin(yaw) + cos(roll) * cos(yaw), cos(roll)* sin(pitch)* sin(yaw) - sin(roll) * cos(yaw),
+        -sin(pitch), cos(pitch)* sin(roll), cos(pitch)* cos(roll);
+
+    return Rbg;
+}
+
 MatrixXf QuadEstimatorEKF::GetRbgPrime(float roll, float pitch, float yaw)
 {
-  // first, figure out the Rbg_prime
-  MatrixXf RbgPrime(3, 3);
-  RbgPrime.setZero();
+    // first, figure out the Rbg_prime
+    MatrixXf RbgPrime(3, 3);
+    // RbgPrime.setZero();
 
-  // Return the partial derivative of the Rbg rotation matrix with respect to yaw. We call this RbgPrime.
-  // INPUTS: 
-  //   roll, pitch, yaw: Euler angles at which to calculate RbgPrime
-  //   
-  // OUTPUT:
-  //   return the 3x3 matrix representing the partial derivative at the given point
+    // Return the partial derivative of the Rbg rotation matrix with respect to yaw. We call this RbgPrime.
+    // INPUTS: 
+    //   roll, pitch, yaw: Euler angles at which to calculate RbgPrime
+    //   
+    // OUTPUT:
+    //   return the 3x3 matrix representing the partial derivative at the given point
 
-  // HINTS
-  // - this is just a matter of putting the right sin() and cos() functions in the right place.
-  //   make sure you write clear code and triple-check your math
-  // - You can also do some numerical partial derivatives in a unit test scheme to check 
-  //   that your calculations are reasonable
+    // HINTS
+    // - this is just a matter of putting the right sin() and cos() functions in the right place.
+    //   make sure you write clear code and triple-check your math
+    // - You can also do some numerical partial derivatives in a unit test scheme to check 
+    //   that your calculations are reasonable
 
-  ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
+    ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
+    RbgPrime <<
+        -1 * cos(pitch) * sin(yaw), -1 * sin(roll) * sin(pitch) * sin(yaw) - cos(roll) * cos(yaw), -1 * cos(roll) * sin(pitch) * sin(yaw) + sin(roll) * cos(yaw),
+        cos(pitch)* cos(yaw), sin(roll)* sin(pitch)* cos(yaw) - cos(roll) * sin(yaw), cos(roll)* sin(pitch)* cos(yaw) + sin(roll) * sin(yaw),
+        0.f, 0.f, 0.f;
 
+    /////////////////////////////// END STUDENT CODE ////////////////////////////
 
-  /////////////////////////////// END STUDENT CODE ////////////////////////////
+    return RbgPrime;
+}
 
-  return RbgPrime;
+MatrixXf QuadEstimatorEKF::GetgPrime(MatrixXf RbgPrime, V3F accel, float dt)
+{
+    // we've created an empty Jacobian for you, currently simply set to identity
+    MatrixXf gPrime(QUAD_EKF_NUM_STATES, QUAD_EKF_NUM_STATES);
+    gPrime.setIdentity();
+
+    gPrime(0, 3) = dt;
+    gPrime(1, 4) = dt;
+    gPrime(2, 5) = dt;
+
+    gPrime(3, 6) = dt * (RbgPrime(0, 0) * accel[0] + RbgPrime(0, 1) * accel[1] + RbgPrime(0, 2) * accel[2]);
+    gPrime(4, 6) = dt * (RbgPrime(1, 0) * accel[0] + RbgPrime(1, 1) * accel[1] + RbgPrime(1, 2) * accel[2]);
+    gPrime(5, 6) = dt * (RbgPrime(2, 0) * accel[0] + RbgPrime(2, 1) * accel[1] + RbgPrime(2, 2) * accel[2]);
+    return gPrime;
 }
 
 void QuadEstimatorEKF::Predict(float dt, V3F accel, V3F gyro)
@@ -226,19 +259,13 @@ void QuadEstimatorEKF::Predict(float dt, V3F accel, V3F gyro)
   // - if you want to transpose a matrix in-place, use A.transposeInPlace(), not A = A.transpose()
   // 
 
-  // we'll want the partial derivative of the Rbg matrix
-  MatrixXf RbgPrime = GetRbgPrime(rollEst, pitchEst, ekfState(6));
-
-  // we've created an empty Jacobian for you, currently simply set to identity
-  MatrixXf gPrime(QUAD_EKF_NUM_STATES, QUAD_EKF_NUM_STATES);
-  gPrime.setIdentity();
-
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
-
-
-  /////////////////////////////// END STUDENT CODE ////////////////////////////
+  MatrixXf RbgPrime = GetRbgPrime(rollEst, pitchEst, ekfState(6));
+  MatrixXf gPrime = GetgPrime(RbgPrime, accel, dt);
 
   ekfState = newState;
+  ekfCov = gPrime * ekfCov * gPrime.transpose() + Q;
+  /////////////////////////////// END STUDENT CODE ////////////////////////////
 }
 
 void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
@@ -259,7 +286,19 @@ void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
   //  - The GPS measurement covariance is available in member variable R_GPS
   //  - this is a very simple update
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
+  hPrime(0, 0) = 1;
+  hPrime(1, 1) = 1;
+  hPrime(2, 2) = 1;
+  hPrime(3, 3) = 1;
+  hPrime(4, 4) = 1;
+  hPrime(5, 5) = 1;
 
+  zFromX(0) = ekfState(0);
+  zFromX(1) = ekfState(1);
+  zFromX(2) = ekfState(2);
+  zFromX(3) = ekfState(3);
+  zFromX(4) = ekfState(4);
+  zFromX(5) = ekfState(5);
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   Update(z, hPrime, R_GPS, zFromX);
@@ -280,8 +319,19 @@ void QuadEstimatorEKF::UpdateFromMag(float magYaw)
   //    (you don't want to update your yaw the long way around the circle)
   //  - The magnetomer measurement covariance is available in member variable R_Mag
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
-
-
+  hPrime(0, 6) = 1;
+  zFromX(0) = ekfState(6);
+ 
+  // normalizing
+  float dpsi = (z - zFromX)(0);
+  if (dpsi > F_PI)
+  {
+      zFromX(0) += 2.f * F_PI;
+  }
+  else if (dpsi < -F_PI)
+  {
+      zFromX(0) -= 2.f * F_PI;
+  }
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   Update(z, hPrime, R_Mag, zFromX);

@@ -25,7 +25,10 @@ public:
 
   // helper functions for Predict
   VectorXf PredictState(VectorXf curState, float dt, V3F accel, V3F gyro);
+  
+  MatrixXf GetRbg(float roll, float pitch, float yaw);
   MatrixXf GetRbgPrime(float roll, float pitch, float yaw);
+  MatrixXf GetgPrime(MatrixXf RbgPrime, V3F accel, float dt);
 
   virtual void UpdateFromIMU(V3F accel, V3F gyro);
   virtual void UpdateFromGPS(V3F pos, V3F vel);
